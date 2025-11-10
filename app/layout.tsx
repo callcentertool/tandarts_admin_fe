@@ -18,7 +18,8 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
-        <title>Healthcare Management System</title>
+        <title>Tandarts Management System</title>
+        <link rel="icon" type="image/svg+xml" href="/favicon.png" />
         <meta
           name="description"
           content="Appointment and User Management System"
