@@ -31,7 +31,7 @@ interface GetUsersResponse {
 export const login = async (body: any) => {
   try {
     const response = await axios.post(
-      `${process.env.NEXT_PUBLIC_API_URL}/auth/login`,
+      `${process.env.NEXT_PUBLIC_API_URL}/v1/auth/login`,
       body
     );
     // Don't show success toast for login as user will be redirected

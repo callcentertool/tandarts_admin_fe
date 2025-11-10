@@ -1,6 +1,6 @@
 import axios, { type AxiosInstance, type AxiosError } from "axios"
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3002/v1"
+const API_BASE_URL = `${process.env.NEXT_PUBLIC_API_URL}/v1` || "http://localhost:3002/v1"
 
 const apiClient: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
