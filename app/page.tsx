@@ -10,9 +10,10 @@ export default function Page() {
   useEffect(() => {
     if (token) {
       router.push("/appointments")
-    } else {
-      router.push("/login")
     }
+    //  else {
+    //   router.push("/login")
+    // }
   }, [token, router])
 
   return null
