@@ -17,6 +17,11 @@ apiClient.interceptors.response.use(
       if (typeof window !== "undefined") {
         localStorage.removeItem("authToken")
         localStorage.removeItem("user")
+       //❗ Remove stale Authorization header
+        delete apiClient.defaults.headers.common["Authorization"]
+        // Clear browser caches if needed
+        sessionStorage.clear()
+
         window.location.href = "/login"
       }
     }
