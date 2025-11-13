@@ -59,18 +59,14 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      let response = await login(data);
-      // // Save to localStorage
-      localStorage.setItem("authToken", response?.tokens?.access?.token);
-      localStorage.setItem("user", JSON.stringify(response?.user));
-
-      dispatch(
-        setAuth({
-          token: response?.tokens?.access?.token,
-          user: response?.user,
-        })
-      );
-      router.push("/appointments");
+  const response = await login(data);
+  localStorage.setItem("authToken", response?.tokens?.access?.token);
+  localStorage.setItem("user", JSON.stringify(response?.user));
+  dispatch(setAuth({
+    token: response?.tokens?.access?.token,
+    user: response?.user,
+  }));
+  router.push("/appointments");
     } catch (err) {
       const error = err as any;
       const errorMessage =
