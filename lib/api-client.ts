@@ -12,22 +12,22 @@ const apiClient: AxiosInstance = axios.create({
 apiClient.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
-    if (error.response?.status === 308) {
-      // Clear localStorage and redirect to login
-      if (typeof window !== "undefined") {
-       //  localStorage.removeItem("authToken")
-       //  localStorage.removeItem("user")
-       // //❗ Remove stale Authorization header
-       //  delete apiClient.defaults.headers.common["Authorization"]
-       //  // Clear browser caches if needed
-       //  sessionStorage.clear()
+    const status = error.response?.status;
 
-        window.location.href = "/login"
+    if (status === 401 || status === 403) {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("authToken");
+        localStorage.removeItem("user");
+        delete apiClient.defaults.headers.common["Authorization"];
+        sessionStorage.clear();
+        window.location.href = "/login";
       }
     }
-    return Promise.reject(error)
+
+    return Promise.reject(error);
   },
-)
+);
+
 
 // Request interceptor: Add access token from localStorage to all API requests
 apiClient.interceptors.request.use(
