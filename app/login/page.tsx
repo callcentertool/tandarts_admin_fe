@@ -59,16 +59,35 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-  await login(data).then((response)=>{
-  localStorage.setItem("authToken", response?.tokens?.access?.token);
-  localStorage.setItem("user", JSON.stringify(response?.user));
-  dispatch(setAuth({
-    token: response?.tokens?.access?.token,
-    user: response?.user,
-  }));
-      console.log("responseresponse" , response)
+login(data)
+  .then((response) => {
+    localStorage.setItem("authToken", response?.tokens?.access?.token);
+    localStorage.setItem("user", JSON.stringify(response?.user));
+
+    dispatch(setAuth({
+      token: response?.tokens?.access?.token,
+      user: response?.user,
+    }));
+
+    console.log("response", response);
+    return response; //  important so next .then gets the response
   })
-  // router.push("/appointments");
+  .then(() => {
+    router.push("/appointments"); //  will run after the above completes
+  })
+  .catch((err) => {
+ const error = err as any;
+      const errorMessage =
+        error?.response?.data?.message || "Authentication failed";
+      dispatch(setError(errorMessage));
+
+      // Set form-level error
+      setFormError("root", {
+        type: "manual",
+        message: errorMessage,
+      });
+  });
+
     } catch (err) {
       const error = err as any;
       const errorMessage =
