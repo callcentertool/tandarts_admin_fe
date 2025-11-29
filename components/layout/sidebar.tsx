@@ -56,7 +56,7 @@ export function Sidebar(props: SidebarProps = {}) {
 
       {/* Sidebar */}
       <div
-        className={`fixed md:relative w-full md:w-64 bg-primary text-white min-h-screen flex flex-col z-40 transform transition-transform duration-300 ${
+        className={`fixed md:relative w-full md:w-64 bg-primary text-white min-h-screen md:max-h-screen flex flex-col z-40 transform transition-transform duration-300 ${
           isOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
         }`}
       >

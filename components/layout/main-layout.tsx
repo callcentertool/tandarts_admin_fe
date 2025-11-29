@@ -55,9 +55,11 @@ export function MainLayout({ children }: MainLayoutProps) {
   }
 
   return (
-    <div className="flex min-h-screen bg-secondary">
-      <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />
-      <div className="flex-1 overflow-auto md:ml-0 ml-0">
+    <div className="flex  bg-secondary">
+      <div className="fixed top-0 left-0 h-screen z-20">
+        <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />
+      </div>
+      <div className="flex-1 ml-0 md:ml-64 overflow-auto min-h-screen">
         {/* Mobile: Header bar with Hamburger, Name, and Dropdown in one line */}
         <div className="md:hidden fixed top-0 left-0 right-0 bg-secondary border-b border-[#8E8E8E52] z-30">
           <div className="flex items-center gap-2 px-4 py-3">
