@@ -1,19 +1,22 @@
 "use client";
 import { MainLayout } from "@/components/layout/main-layout";
 import React, { useState, useEffect, useRef } from "react";
-import { Plus } from "lucide-react";
-import { getQuestions } from "@/services/questions.service";
+import { Plus, Edit } from "lucide-react";
+import { getQuestions, updateQuestion, createQuestion } from "@/services/questions.service";
 import {
   setLoading,
   setQuestionnaires,
 } from "@/store/slices/questionnairesSlice";
 import { useDispatch, useSelector } from "react-redux";
+import { QuestionModal } from "@/components/modals/question-modal";
 
 const QuestionnairesPage = () => {
   const dispatch = useDispatch();
   const { items, isLoading, error } = useSelector(
     (state) => state.questionnaires
   );
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedQuestionId, setSelectedQuestionId] = useState(null);
 
   // Fetch questions
   const fetchQuestions = async () => {
@@ -36,32 +39,71 @@ const QuestionnairesPage = () => {
     fetchQuestions();
   }, []);
 
+  // Handle edit click
+  const handleEditClick = (questionId) => {
+    setSelectedQuestionId(questionId);
+    setIsModalOpen(true);
+  };
+
+  // Handle modal submission
+  const handleModalSubmit = async (data) => {
+    try {
+      if (selectedQuestionId) {
+        // Update existing question
+        await updateQuestion(selectedQuestionId, data);
+      } else {
+        // Create new question
+        await createQuestion(data);
+      }
+      // Refresh questions list
+      await fetchQuestions();
+      setIsModalOpen(false);
+      setSelectedQuestionId(null);
+    } catch (err) {
+      console.error("Error saving question:", err);
+    }
+  };
+
+  // Handle modal close
+  const handleModalClose = (open) => {
+    setIsModalOpen(open);
+    if (!open) {
+      setSelectedQuestionId(null);
+    }
+  };
+
   return (
     <MainLayout>
-      {" "}
       <div className="sm:space-y-6">
-        {" "}
         <div className="min-h-screen">
-          {" "}
           <div className="max-w-7xl mx-auto">
             {isLoading ? (
               <div className="flex justify-center items-center h-64 text-gray-500">
-                Loading questions...{" "}
+                Loading questions...
               </div>
             ) : error ? (
               <div className="flex justify-center items-center h-64 text-red-500">
-                Error loading questions.{" "}
+                Error loading questions.
               </div>
             ) : items.length === 0 ? (
               <div className="flex justify-center items-center h-64 text-gray-400">
-                No questions found.{" "}
+                No questions found.
               </div>
             ) : (
-              <HierarchyChart data={items} />
-            )}{" "}
-          </div>{" "}
-        </div>{" "}
-      </div>{" "}
+              <HierarchyChart data={items} onEditClick={handleEditClick} />
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Question Modal */}
+      <QuestionModal
+        open={isModalOpen}
+        onOpenChange={handleModalClose}
+        questionId={selectedQuestionId}
+        allQuestions={items}
+        onSubmit={handleModalSubmit}
+      />
     </MainLayout>
   );
 };
@@ -72,7 +114,7 @@ export default QuestionnairesPage;
 // HIERARCHY CHART COMPONENT
 // ─────────────────────────────────────────────
 
-const HierarchyChart = ({ data }) => {
+const HierarchyChart = ({ data, onEditClick }) => {
   const [selectedCard, setSelectedCard] = useState(null);
   const [activeConnections, setActiveConnections] = useState([]);
   const [connectionLines, setConnectionLines] = useState([]);
@@ -254,6 +296,7 @@ const HierarchyChart = ({ data }) => {
               isSelected={selectedCard === person._id}
               connectionCount={(person.children || []).filter(Boolean).length}
               onClick={() => handleCardClick(person._id)}
+              onEditClick={onEditClick}
             />
           ))}
         </div>
@@ -266,7 +309,7 @@ const HierarchyChart = ({ data }) => {
 // CARD COMPONENT
 // ─────────────────────────────────────────────
 
-const Card = ({ person, isSelected, connectionCount, onClick }) => {
+const Card = ({ person, isSelected, connectionCount, onClick, onEditClick }) => {
   const getFriendlyType = (type) => {
     switch (type) {
       case "boolean":
@@ -313,25 +356,48 @@ const Card = ({ person, isSelected, connectionCount, onClick }) => {
         }
       `}
     >
-      {connectionCount > 0 && (
-        <div
-          className={`absolute -top-2 -right-2 rounded-full w-5  flex items-center justify-center text-xs font-bold
-            ${
-              isSelected
-                ? "bg-blue-600 text-white"
-                : "bg-gray-200 text-gray-700"
-            }
-          `}
-        >
-          {connectionCount}{" "}
-        </div>
-      )}
+      <div className="absolute -top-2 -right-2 flex items-center gap-1">
+        {connectionCount > 0 && (
+          <div
+            className={`rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold
+              ${
+                isSelected
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-200 text-gray-700"
+              }
+            `}
+          >
+            {connectionCount}
+          </div>
+        )}
+        {(person.type === "boolean" ||
+          person.type === "selection" ||
+          person.type === "newComplain" ||
+          person.type === "result" ||
+          person.type === "inputFields") && (
+          <div
+            className={`rounded-full w-5 h-5 flex items-center justify-center cursor-pointer transition-colors
+              ${
+                isSelected
+                  ? "bg-blue-600 text-white hover:bg-blue-700"
+                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+              }
+            `}
+            onClick={(e) => {
+              e.stopPropagation();
+              onEditClick(person._id);
+            }}
+          >
+            <Edit size={12} />
+          </div>
+        )}
+      </div>
 
       <div className="flex flex-col">
         <h5 className="font-bold text-gray-800 text-sm">
           Question Type: {getFriendlyType(person.type)}
         </h5>
-        <p className="text-xs text-black">{displayText}</p>
+        <p className="text-xs text-black" title={mainText}>{displayText}</p>
       </div>
     </div>
   );
