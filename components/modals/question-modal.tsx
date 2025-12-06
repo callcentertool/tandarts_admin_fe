@@ -23,13 +23,20 @@ import { fetchQuestionById } from "@/services/questions.service";
 import { InputFieldsForm } from "@/components/question-forms/input-fields-form";
 import { toast } from "@/hooks/use-toast";
 
-// Question types
-const QUESTION_TYPES = [
+// Question types - full list
+const ALL_QUESTION_TYPES = [
   { value: "boolean", label: "Boolean" },
   { value: "selection", label: "Selection" },
   { value: "newComplain", label: "New Complaint" },
   { value: "inputFields", label: "Input Fields" },
   { value: "result", label: "Result" },
+];
+
+// Question types - restricted for child questions
+const RESTRICTED_QUESTION_TYPES = [
+  { value: "inputFields", label: "Input Fields" },
+  { value: "selection", label: "Selection" },
+  { value: "boolean", label: "Boolean" },
 ];
 
 // Validation schema
@@ -111,6 +118,8 @@ interface QuestionModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   questionId: string | null;
+  parentId?: string | null;
+  childId?: string | null;
   allQuestions: any[];
   onSubmit: (data: any) => void;
 }
@@ -119,6 +128,8 @@ export function QuestionModal({
   open,
   onOpenChange,
   questionId,
+  parentId,
+  childId,
   allQuestions,
   onSubmit,
 }: QuestionModalProps) {
@@ -237,10 +248,11 @@ export function QuestionModal({
             en: "Next",
             dutch: "Volgende",
           },
-          nextId: null,
+          nextId: parentId && childId ? childId : null,
         },
       });
       setQuestionData(null);
+      // If parentId exists, the Boolean options will be initialized in the useEffect
     }
   }, [open, isEdit, questionId, reset]);
 
@@ -329,6 +341,17 @@ export function QuestionModal({
     } else if (data.type === "boolean") {
       if (!data.options || data.options.length === 0) {
         errors.push("Boolean options are required");
+      } else {
+        // Validate that both Yes and No options have connected questions
+        const yesOption = data.options.find((opt: any) => opt.name?.en === "Yes");
+        const noOption = data.options.find((opt: any) => opt.name?.en === "No");
+        
+        if (!yesOption || !yesOption.nextId) {
+          errors.push("Yes option must have a connected question");
+        }
+        if (!noOption || !noOption.nextId) {
+          errors.push("No option must have a connected question");
+        }
       }
     }
 
@@ -393,6 +416,8 @@ export function QuestionModal({
   // Boolean options (Yes/No) - handled separately
   useEffect(() => {
     if (isBoolean && !isEdit) {
+      // If creating a child question (parentId exists), set childId on Yes option
+      const yesNextId = parentId && childId ? childId : null;
       setValue("options", [
         {
           name: { en: "No", dutch: "Nee" },
@@ -402,13 +427,13 @@ export function QuestionModal({
         {
           name: { en: "Yes", dutch: "Ja" },
           selected: false,
-          nextId: null,
+          nextId: yesNextId,
         },
       ] as any);
     } else if (isBoolean && isEdit && questionData?.options) {
       setValue("options", questionData.options);
     }
-  }, [isBoolean, isEdit, questionData, setValue]);
+  }, [isBoolean, isEdit, questionData, setValue, parentId, childId]);
 
   // Get connected question options with type
   const getFriendlyType = (type: string) => {
@@ -434,14 +459,35 @@ export function QuestionModal({
     }
   };
 
+  // Helper function to format question text (truncate to 40 chars, full text in title)
+  const formatQuestionLabel = (question: any) => {
+    const typeLabel = getFriendlyType(question.type || "");
+    const fullText = question.mainText?.en || question.paragraphs?.[0]?.en || question._id;
+    const displayText = fullText.length > 40 ? fullText.substring(0, 40) + "..." : fullText;
+    return {
+      label: `${typeLabel} - ${displayText}`,
+      fullLabel: `${typeLabel} - ${fullText}`,
+      fullText: fullText,
+    };
+  };
+
   const connectedQuestionOptions = allQuestions.map((q) => {
-    const typeLabel = getFriendlyType(q.type || "");
-    const text = q.mainText?.en || q.paragraphs?.[0]?.en || q._id;
+    const formatted = formatQuestionLabel(q);
     return {
       value: q._id,
-      label: `${typeLabel} - ${text}`,
+      label: formatted.label,
+      title: formatted.fullLabel,
     };
   });
+
+  // Determine which question types to show
+  const availableQuestionTypes = parentId ? RESTRICTED_QUESTION_TYPES : ALL_QUESTION_TYPES;
+
+  // Get parent question for "From" field
+  const parentQuestion = parentId ? allQuestions.find((q) => q._id === parentId) : null;
+  const parentQuestionFormatted = parentQuestion ? formatQuestionLabel(parentQuestion) : null;
+  const parentQuestionLabel = parentQuestionFormatted ? parentQuestionFormatted.label : "";
+  const parentQuestionTitle = parentQuestionFormatted ? parentQuestionFormatted.fullLabel : "";
 
   const currentNextId = watch("action.nextId");
 
@@ -473,6 +519,27 @@ export function QuestionModal({
               }}
               className="space-y-4"
             >
+              {/* From Field - Show parent question when creating a child */}
+              {parentId && (
+                <div className="space-y-3 border-b pb-4">
+                  <h4 className="text-sm font-semibold">From</h4>
+                  <div title={parentQuestionTitle}>
+                    <Select
+                      label="Parent Question"
+                      value={parentId || ""}
+                      options={[
+                        {
+                          value: parentId || "",
+                          label: parentQuestionLabel,
+                          title: parentQuestionTitle,
+                        },
+                      ]}
+                      disabled={true}
+                    />
+                  </div>
+                </div>
+              )}
+
               {/* Question Type Dropdown */}
               <div className="w-48">
                 <Select
@@ -492,8 +559,8 @@ export function QuestionModal({
                     setValue("points", []);
                     setValue("urgency", "low");
                   }
-                }}
-                  options={QUESTION_TYPES}
+                  }}
+                  options={availableQuestionTypes}
                   disabled={isEdit}
                   error={!!errors.type}
                   errorMessage={(errors.type?.message as string) || ""}
@@ -537,40 +604,110 @@ export function QuestionModal({
               )}
 
               {/* Boolean Options - Show nextId for each option */}
-              {isBoolean && (
+              {isBoolean && (() => {
+                const hasChildIdConnection = !!(parentId && childId);
+                
+                return (
                 <div className="space-y-3 border rounded-lg p-4 bg-gray-50">
                   <h4 className="text-sm font-semibold mb-3">Yes/No Options</h4>
-                  {watch("options")?.map((option: any, index: number) => (
-                    <div key={index} className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium w-12">
-                          {option.name?.en || "Option"}
-                        </span>
-                        <Select
-                          label={`Connected To (${option.name?.en})`}
-                          value={(option as any).nextId || ""}
-                          onChange={(e) => {
-                            const options = (watch("options") || []) as any[];
-                            (options[index] as any).nextId = e.target.value || null;
-                            setValue("options", options as any);
-                          }}
-                          options={[
-                            { value: "", label: "None" },
-                            ...connectedQuestionOptions,
-                          ]}
-                          disabled={isEdit}
-                          className="flex-1"
-                        />
+                  {watch("options")?.map((option: any, index: number) => {
+                    const isYesOption = option.name?.en === "Yes";
+                    const isNoOption = option.name?.en === "No";
+                    
+                    // Get the full text for the selected question
+                    const selectedQuestionId = (option as any).nextId;
+                    const selectedQuestion = selectedQuestionId 
+                      ? allQuestions.find((q) => q._id === selectedQuestionId)
+                      : null;
+                    const selectedQuestionTitle = selectedQuestion 
+                      ? formatQuestionLabel(selectedQuestion).fullLabel 
+                      : "";
+
+                    return (
+                      <div key={index} className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium w-12">
+                            {option.name?.en || "Option"}
+                          </span>
+                          <div title={selectedQuestionTitle} className="flex-1">
+                            <Select
+                              label={`Connected To (${option.name?.en})`}
+                              value={(option as any).nextId || ""}
+                              onChange={(e) => {
+                              const options = (watch("options") || []) as any[];
+                              const newNextId = e.target.value || null;
+                              
+                              // If creating with parentId and childId, ensure childId stays in one option
+                              if (hasChildIdConnection && childId) {
+                                const noOptionIndex = options.findIndex((opt: any) => opt.name?.en === "No");
+                                const yesOptionIndex = options.findIndex((opt: any) => opt.name?.en === "Yes");
+                                
+                                if (isYesOption) {
+                                  // If Yes is being changed
+                                  if (newNextId === childId) {
+                                    // Yes gets childId, remove from No
+                                    if (noOptionIndex !== -1) {
+                                      (options[noOptionIndex] as any).nextId = null;
+                                    }
+                                    (options[index] as any).nextId = childId;
+                                  } else {
+                                    // Yes lost childId (if it had it), move to No to ensure childId is preserved
+                                    if ((options[index] as any).nextId === childId) {
+                                      if (noOptionIndex !== -1) {
+                                        (options[noOptionIndex] as any).nextId = childId;
+                                      }
+                                    }
+                                    (options[index] as any).nextId = newNextId;
+                                  }
+                                } else if (isNoOption) {
+                                  // If No is being changed
+                                  if (newNextId === childId) {
+                                    // No gets childId, remove from Yes
+                                    if (yesOptionIndex !== -1) {
+                                      (options[yesOptionIndex] as any).nextId = null;
+                                    }
+                                    (options[index] as any).nextId = childId;
+                                  } else {
+                                    // No lost childId (if it had it), move to Yes to ensure childId is preserved
+                                    if ((options[index] as any).nextId === childId) {
+                                      if (yesOptionIndex !== -1) {
+                                        (options[yesOptionIndex] as any).nextId = childId;
+                                      }
+                                    }
+                                    (options[index] as any).nextId = newNextId;
+                                  }
+                                }
+                              } else {
+                                // Normal behavior when not creating with childId
+                                (options[index] as any).nextId = newNextId;
+                              }
+                              
+                              setValue("options", options as any);
+                            }}
+                            options={[
+                              { value: "", label: "None" },
+                              ...connectedQuestionOptions,
+                            ]}
+                            disabled={isEdit}
+                          />
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   {isEdit && (
                     <p className="text-xs text-gray-500 mt-2">
                       Connected questions are disabled in edit mode for boolean type.
                     </p>
                   )}
+                  {!isEdit && hasChildIdConnection && (
+                    <p className="text-xs text-gray-500 mt-2">
+                      Child question will connect to the selected option (Yes or No).
+                    </p>
+                  )}
                 </div>
-              )}
+                );
+              })()}
 
               {/* Selection Options */}
               {isSelection && (
@@ -823,25 +960,41 @@ export function QuestionModal({
               )}
 
               {/* Connected Question Section - Only show if not boolean and not result */}
-              {!isBoolean && !isResult && (
-                <div className="space-y-3 border-t pt-4">
-                  <h4 className="text-sm font-semibold">Connected To</h4>
-                  <Select
-                    label="Connected Question"
-                    value={currentNextId || ""}
-                    onChange={(e) => {
-                      setValue("action.nextId", (e.target.value || null) as any);
-                    }}
-                    options={[
-                      { value: "", label: "None" },
-                      ...connectedQuestionOptions,
-                    ]}
-                    disabled={isEdit}
-                    error={!!(errors.action as any)?.nextId}
-                    errorMessage={((errors.action as any)?.nextId?.message as string) || ""}
-                  />
-                </div>
-              )}
+              {!isBoolean && !isResult && (() => {
+                const selectedConnectedId = currentNextId || (parentId && childId ? childId : "");
+                const selectedConnectedQuestion = selectedConnectedId 
+                  ? allQuestions.find((q) => q._id === selectedConnectedId)
+                  : null;
+                const selectedConnectedTitle = selectedConnectedQuestion 
+                  ? formatQuestionLabel(selectedConnectedQuestion).fullLabel 
+                  : "";
+                
+                return (
+                  <div className="space-y-3 border-t pt-4">
+                    <h4 className="text-sm font-semibold">Connected To</h4>
+                    <div title={selectedConnectedTitle}>
+                      <Select
+                        label="Connected Question"
+                        value={selectedConnectedId}
+                        onChange={(e) => {
+                          setValue("action.nextId", (e.target.value || null) as any);
+                        }}
+                        options={[
+                          { value: "", label: "None" },
+                          ...connectedQuestionOptions,
+                          // Include childId as an option if it exists and is not already in the list
+                          ...(parentId && childId && !connectedQuestionOptions.some((opt) => opt.value === childId)
+                            ? [{ value: childId, label: `New Child Question (${childId})`, title: `New Child Question (${childId})` }]
+                            : []),
+                        ]}
+                        disabled={isEdit || !!parentId}
+                        error={!!(errors.action as any)?.nextId}
+                        errorMessage={((errors.action as any)?.nextId?.message as string) || ""}
+                      />
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Submit Buttons */}
               <div className="flex gap-2 justify-end pt-4 border-t">

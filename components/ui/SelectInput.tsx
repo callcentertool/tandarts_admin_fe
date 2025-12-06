@@ -6,7 +6,7 @@ export interface SelectProps extends React.ComponentProps<"select"> {
   errorMessage?: string;
   label?: string;
   placeholder?: string;
-  options?: { value: string; label: string }[];
+  options?: { value: string; label: string; title?: string }[];
   children?: React.ReactNode;
 }
 
@@ -55,7 +55,7 @@ const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
 
           {/* Options from props */}
           {options?.map((option) => (
-            <option key={option.value} value={option.value}>
+            <option key={option.value} value={option.value} title={option.title || option.label}>
               {option.label}
             </option>
           ))}
