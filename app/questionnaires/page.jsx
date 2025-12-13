@@ -174,12 +174,231 @@ const HierarchyChart = ({ data, onEditClick, onAddChildClick }) => {
     const calculateLines = () => {
       if (!chartRef.current) return;
 
-      const lines = [];
       const chartRect = chartRef.current.getBoundingClientRect();
-      const OFFSET_RANGE = 40; // Maximum horizontal offset in pixels
-      const MIN_OFFSET = 8; // Minimum offset to prevent visual overlap
+      const CARD_PADDING = 15; // Minimum distance from cards
+      const LINE_SPACING = 10; // Minimum spacing between parallel lines
+      const GRID_SIZE = 5; // Grid size for pathfinding (smaller = more precise but slower)
 
-      // First pass: collect all lines with basic positions
+      // ─────────────────────────────────────────────
+      // 1. OBSTACLE DETECTION SYSTEM
+      // ─────────────────────────────────────────────
+      const obstacles = [];
+      const cardRects = {};
+
+      // Collect all card positions as obstacles
+      filteredData.forEach((item) => {
+        const cardElement = document.getElementById(`card-${item._id}`);
+        if (cardElement) {
+          const rect = cardElement.getBoundingClientRect();
+          const cardRect = {
+            left: rect.left - chartRect.left - CARD_PADDING,
+            right: rect.right - chartRect.left + CARD_PADDING,
+            top: rect.top - chartRect.top - CARD_PADDING,
+            bottom: rect.bottom - chartRect.top + CARD_PADDING,
+            id: item._id,
+          };
+          obstacles.push(cardRect);
+          cardRects[item._id] = cardRect;
+        }
+      });
+
+      // Helper: Check if a point is inside any obstacle
+      const isPointInObstacle = (x, y) => {
+        return obstacles.some(
+          (obs) => x >= obs.left && x <= obs.right && y >= obs.top && y <= obs.bottom
+        );
+      };
+
+      // Helper: Check if a line segment intersects any obstacle
+      const lineSegmentIntersectsObstacle = (x1, y1, x2, y2) => {
+        // Check if any point along the line segment is in an obstacle
+        const steps = Math.max(Math.abs(x2 - x1), Math.abs(y2 - y1)) / GRID_SIZE;
+        for (let i = 0; i <= steps; i++) {
+          const t = i / steps;
+          const x = x1 + (x2 - x1) * t;
+          const y = y1 + (y2 - y1) * t;
+          if (isPointInObstacle(x, y)) return true;
+        }
+        return false;
+      };
+
+      // ─────────────────────────────────────────────
+      // 2. ORTHOGONAL PATHFINDING (A* Algorithm)
+      // ─────────────────────────────────────────────
+      const findOrthogonalPath = (startX, startY, endX, endY, sourceId, targetId) => {
+        // Try simple L-shaped paths first (faster)
+        const trySimplePath = (viaX, viaY) => {
+          const path1 = [
+            { x: startX, y: startY },
+            { x: viaX, y: startY },
+            { x: viaX, y: viaY },
+            { x: endX, y: viaY },
+            { x: endX, y: endY },
+          ];
+          // Check if this path avoids obstacles (excluding source/target cards)
+          let valid = true;
+          for (let i = 0; i < path1.length - 1; i++) {
+            const segStart = path1[i];
+            const segEnd = path1[i + 1];
+            // Sample points along the segment
+            const steps = Math.max(Math.abs(segEnd.x - segStart.x), Math.abs(segEnd.y - segStart.y)) / GRID_SIZE;
+            for (let j = 1; j < steps; j++) {
+              const t = j / steps;
+              const x = segStart.x + (segEnd.x - segStart.x) * t;
+              const y = segStart.y + (segEnd.y - segStart.y) * t;
+              // Check if point is in an obstacle
+              const inObstacle = obstacles.some((obs) => {
+                if (obs.id === sourceId || obs.id === targetId) return false; // Allow source/target
+                return x >= obs.left && x <= obs.right && y >= obs.top && y <= obs.bottom;
+              });
+              if (inObstacle) {
+                valid = false;
+                break;
+              }
+            }
+            if (!valid) break;
+          }
+          return valid ? path1 : null;
+        };
+
+        // Try horizontal-first path
+        const hPath = trySimplePath(endX, startY);
+        if (hPath) return hPath;
+
+        // Try vertical-first path
+        const vPath = trySimplePath(startX, endY);
+        if (vPath) return vPath;
+
+        // Try middle paths
+        const midX = (startX + endX) / 2;
+        const midY = (startY + endY) / 2;
+        const midPath1 = trySimplePath(midX, startY);
+        if (midPath1) return midPath1;
+        const midPath2 = trySimplePath(startX, midY);
+        if (midPath2) return midPath2;
+
+        // If simple paths don't work, use A* algorithm
+        // Round to grid
+        const roundToGrid = (val) => Math.round(val / GRID_SIZE) * GRID_SIZE;
+        const start = { x: roundToGrid(startX), y: roundToGrid(startY) };
+        const goal = { x: roundToGrid(endX), y: roundToGrid(endY) };
+
+        // Manhattan distance heuristic
+        const heuristic = (a, b) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+
+        // Get neighbors (orthogonal only)
+        const getNeighbors = (node) => {
+          const neighbors = [];
+          const directions = [
+            { x: GRID_SIZE, y: 0 },
+            { x: -GRID_SIZE, y: 0 },
+            { x: 0, y: GRID_SIZE },
+            { x: 0, y: -GRID_SIZE },
+          ];
+
+          directions.forEach((dir) => {
+            const neighbor = { x: node.x + dir.x, y: node.y + dir.y };
+            // Skip if in source or target card (but allow connection points)
+            const inSourceCard = cardRects[sourceId] &&
+              neighbor.x >= cardRects[sourceId].left &&
+              neighbor.x <= cardRects[sourceId].right &&
+              neighbor.y >= cardRects[sourceId].top &&
+              neighbor.y <= cardRects[sourceId].bottom;
+            const inTargetCard = cardRects[targetId] &&
+              neighbor.x >= cardRects[targetId].left &&
+              neighbor.x <= cardRects[targetId].right &&
+              neighbor.y >= cardRects[targetId].top &&
+              neighbor.y <= cardRects[targetId].bottom;
+
+            if (!inSourceCard && !inTargetCard && !isPointInObstacle(neighbor.x, neighbor.y)) {
+              neighbors.push(neighbor);
+            }
+          });
+
+          return neighbors;
+        };
+
+        // A* pathfinding
+        const openSet = [{ ...start, g: 0, h: heuristic(start, goal), f: heuristic(start, goal) }];
+        const closedSet = new Set();
+        const cameFrom = new Map();
+        const gScore = new Map();
+        const fScore = new Map();
+
+        const nodeKey = (node) => `${node.x},${node.y}`;
+        gScore.set(nodeKey(start), 0);
+        fScore.set(nodeKey(start), heuristic(start, goal));
+
+        let maxIterations = 5000;
+        let iterations = 0;
+
+        while (openSet.length > 0 && iterations < maxIterations) {
+          iterations++;
+
+          // Find node with lowest f score
+          openSet.sort((a, b) => a.f - b.f);
+          const current = openSet.shift();
+          const currentKey = nodeKey(current);
+
+          if (closedSet.has(currentKey)) continue;
+          closedSet.add(currentKey);
+
+          // Check if we reached the goal (within tolerance)
+          if (heuristic(current, goal) < GRID_SIZE * 2) {
+            // Reconstruct path
+            const path = [goal];
+            let node = current;
+            while (node) {
+              path.unshift(node);
+              const key = nodeKey(node);
+              node = cameFrom.get(key);
+            }
+            path[0] = { x: startX, y: startY };
+            path[path.length - 1] = { x: endX, y: endY };
+            return path;
+          }
+
+          // Explore neighbors
+          const neighbors = getNeighbors(current);
+          neighbors.forEach((neighbor) => {
+            const neighborKey = nodeKey(neighbor);
+            if (closedSet.has(neighborKey)) return;
+
+            const tentativeG = (gScore.get(currentKey) || Infinity) + GRID_SIZE;
+
+            if (!gScore.has(neighborKey) || tentativeG < gScore.get(neighborKey)) {
+              cameFrom.set(neighborKey, current);
+              gScore.set(neighborKey, tentativeG);
+              const h = heuristic(neighbor, goal);
+              const f = tentativeG + h;
+              fScore.set(neighborKey, f);
+
+              const existing = openSet.find((n) => nodeKey(n) === neighborKey);
+              if (!existing) {
+                openSet.push({ ...neighbor, g: tentativeG, h, f });
+              } else {
+                existing.g = tentativeG;
+                existing.h = h;
+                existing.f = f;
+              }
+            }
+          });
+        }
+
+        // Fallback: simple L-shaped path if A* fails
+        const fallbackPath = [
+          { x: startX, y: startY },
+          { x: startX, y: (startY + endY) / 2 },
+          { x: endX, y: (startY + endY) / 2 },
+          { x: endX, y: endY },
+        ];
+        return fallbackPath;
+      };
+
+      // ─────────────────────────────────────────────
+      // 3. COLLECT CONNECTIONS AND CALCULATE PATHS
+      // ─────────────────────────────────────────────
+      const connections = [];
       Object.entries(mappedConnections).forEach(([sourceId, targets]) => {
         targets.forEach((targetId) => {
           const sourceCard = document.getElementById(`card-${sourceId}`);
@@ -189,245 +408,160 @@ const HierarchyChart = ({ data, onEditClick, onAddChildClick }) => {
             const sourceRect = sourceCard.getBoundingClientRect();
             const targetRect = targetCard.getBoundingClientRect();
 
-            lines.push({
+            const sourceX = sourceRect.left + sourceRect.width / 2 - chartRect.left;
+            const sourceY = sourceRect.bottom - chartRect.top - 5;
+            const targetX = targetRect.left + targetRect.width / 2 - chartRect.left;
+            const targetY = targetRect.top - chartRect.top + 5;
+
+            connections.push({
               id: `${sourceId}-${targetId}`,
-              sourceX: sourceRect.left + sourceRect.width / 2 - chartRect.left,
-              sourceY: sourceRect.bottom - chartRect.top - 5,
-              targetX: targetRect.left + targetRect.width / 2 - chartRect.left,
-              targetY: targetRect.top - chartRect.top + 5,
-              sourceId: sourceId,
-              targetId: targetId,
-              // Store card bounds for icon positioning
-              sourceRect: {
-                left: sourceRect.left - chartRect.left,
-                right: sourceRect.right - chartRect.left,
-                top: sourceRect.top - chartRect.top,
-                bottom: sourceRect.bottom - chartRect.top,
-              },
-              targetRect: {
-                left: targetRect.left - chartRect.left,
-                right: targetRect.right - chartRect.left,
-                top: targetRect.top - chartRect.top,
-                bottom: targetRect.bottom - chartRect.top,
-              },
+              sourceId,
+              targetId,
+              sourceX,
+              sourceY,
+              targetX,
+              targetY,
+              sourceRect: cardRects[sourceId],
+              targetRect: cardRects[targetId],
             });
           }
         });
       });
 
-      // Group lines by target ID (multiple parents pointing to same child)
+      // ─────────────────────────────────────────────
+      // 4. HANDLE MULTIPLE LINES (SPACING)
+      // ─────────────────────────────────────────────
+      // Group by target and source for offset calculation
       const linesByTarget = {};
-      lines.forEach((line) => {
-        if (!linesByTarget[line.targetId]) {
-          linesByTarget[line.targetId] = [];
-        }
-        linesByTarget[line.targetId].push(line);
-      });
-
-      // Group lines by source ID (one parent with multiple children)
       const linesBySource = {};
-      lines.forEach((line) => {
-        if (!linesBySource[line.sourceId]) {
-          linesBySource[line.sourceId] = [];
-        }
-        linesBySource[line.sourceId].push(line);
+      connections.forEach((conn) => {
+        if (!linesByTarget[conn.targetId]) linesByTarget[conn.targetId] = [];
+        if (!linesBySource[conn.sourceId]) linesBySource[conn.sourceId] = [];
+        linesByTarget[conn.targetId].push(conn);
+        linesBySource[conn.sourceId].push(conn);
       });
 
-      // Calculate offsets for lines sharing the same target
+      // Apply offsets for multiple connections
+      const OFFSET_RANGE = 30;
       Object.values(linesByTarget).forEach((targetLines) => {
         if (targetLines.length > 1) {
-          // Sort by source X position for consistent ordering
           targetLines.sort((a, b) => a.sourceX - b.sourceX);
-          
-          // Calculate offsets: distribute evenly across offset range
           const offsetStep = (OFFSET_RANGE * 2) / (targetLines.length + 1);
           targetLines.forEach((line, index) => {
-            const offsetIndex = index + 1;
-            const offset = -OFFSET_RANGE + offsetStep * offsetIndex;
-            // Ensure minimum offset for visual separation
-            line.targetOffsetX = Math.abs(offset) < MIN_OFFSET 
-              ? (offset >= 0 ? MIN_OFFSET : -MIN_OFFSET) 
-              : offset;
+            const offset = -OFFSET_RANGE + offsetStep * (index + 1);
+            line.targetOffsetX = offset;
           });
         } else {
           targetLines[0].targetOffsetX = 0;
         }
       });
 
-      // Calculate offsets for lines sharing the same source
       Object.values(linesBySource).forEach((sourceLines) => {
         if (sourceLines.length > 1) {
-          // Sort by target X position for consistent ordering
           sourceLines.sort((a, b) => a.targetX - b.targetX);
-          
-          // Calculate offsets: distribute evenly across offset range
           const offsetStep = (OFFSET_RANGE * 2) / (sourceLines.length + 1);
           sourceLines.forEach((line, index) => {
-            const offsetIndex = index + 1;
-            const sourceOffset = -OFFSET_RANGE + offsetStep * offsetIndex;
-            // Ensure minimum offset for visual separation
-            const finalSourceOffset = Math.abs(sourceOffset) < MIN_OFFSET 
-              ? (sourceOffset >= 0 ? MIN_OFFSET : -MIN_OFFSET) 
-              : sourceOffset;
-            
-            // Combine with target offset if it exists
-            line.sourceOffsetX = finalSourceOffset;
-            if (!line.targetOffsetX) {
-              line.targetOffsetX = 0;
-            }
+            const offset = -OFFSET_RANGE + offsetStep * (index + 1);
+            line.sourceOffsetX = offset;
+            if (!line.targetOffsetX) line.targetOffsetX = 0;
           });
         } else {
-          if (!sourceLines[0].sourceOffsetX) {
-            sourceLines[0].sourceOffsetX = 0;
-          }
-          if (!sourceLines[0].targetOffsetX) {
-            sourceLines[0].targetOffsetX = 0;
-          }
+          if (!sourceLines[0].sourceOffsetX) sourceLines[0].sourceOffsetX = 0;
+          if (!sourceLines[0].targetOffsetX) sourceLines[0].targetOffsetX = 0;
         }
       });
 
-      // Handle very close parent/child positions
-      lines.forEach((line) => {
-        const horizontalDistance = Math.abs(line.targetX - line.sourceX);
-        if (horizontalDistance < MIN_OFFSET * 2) {
-          // If cards are very close, ensure minimum offset to prevent overlap
-          if (Math.abs(line.sourceOffsetX) < MIN_OFFSET && Math.abs(line.targetOffsetX) < MIN_OFFSET) {
-            line.sourceOffsetX = line.sourceOffsetX >= 0 ? MIN_OFFSET : -MIN_OFFSET;
-            line.targetOffsetX = line.targetOffsetX >= 0 ? MIN_OFFSET : -MIN_OFFSET;
-          }
-        }
-      });
-
-      // Ensure all lines have offset values and calculate plus icon positions
+      // ─────────────────────────────────────────────
+      // 5. CALCULATE PATHS FOR EACH CONNECTION
+      // ─────────────────────────────────────────────
+      const lines = [];
       const icons = [];
-      const ICON_RADIUS = 12; // Half size of plus icon (for overlap detection)
-      const MIN_DISTANCE_FROM_CARD = 15; // Minimum distance from card edge
+      const ICON_RADIUS = 12;
+      const MIN_DISTANCE_FROM_CARD = 15;
 
-      lines.forEach((line) => {
-        if (line.sourceOffsetX === undefined) line.sourceOffsetX = 0;
-        if (line.targetOffsetX === undefined) line.targetOffsetX = 0;
+      connections.forEach((conn) => {
+        const sourceX = conn.sourceX + (conn.sourceOffsetX || 0);
+        const sourceY = conn.sourceY;
+        const targetX = conn.targetX + (conn.targetOffsetX || 0);
+        const targetY = conn.targetY;
 
-        // Calculate actual connection points with offsets
-        const sourceX = line.sourceX + (line.sourceOffsetX || 0);
-        const sourceY = line.sourceY;
-        const targetX = line.targetX + (line.targetOffsetX || 0);
-        const targetY = line.targetY;
+        // Find orthogonal path
+        const path = findOrthogonalPath(
+          sourceX,
+          sourceY,
+          targetX,
+          targetY,
+          conn.sourceId,
+          conn.targetId
+        );
 
-        // Calculate control point for quadratic Bezier curve
-        const controlY = sourceY + (targetY - sourceY) / 2;
-        const controlX = (sourceX + targetX) / 2;
-
-        // Helper function to check if a point is inside a card
-        const isInsideCard = (x, y, cardRect) => {
-          return x >= cardRect.left && 
-                 x <= cardRect.right && 
-                 y >= cardRect.top && 
-                 y <= cardRect.bottom;
-        };
-
-        // Helper function to check if a point is too close to a card
-        const isTooCloseToCard = (x, y, cardRect) => {
-          const iconLeft = x - ICON_RADIUS;
-          const iconRight = x + ICON_RADIUS;
-          const iconTop = y - ICON_RADIUS;
-          const iconBottom = y + ICON_RADIUS;
-
-          return !(iconRight < cardRect.left - MIN_DISTANCE_FROM_CARD ||
-                   iconLeft > cardRect.right + MIN_DISTANCE_FROM_CARD ||
-                   iconBottom < cardRect.top - MIN_DISTANCE_FROM_CARD ||
-                   iconTop > cardRect.bottom + MIN_DISTANCE_FROM_CARD);
-        };
-
-        // Find a safe position along the curve that is OUTSIDE both cards
-        // Priority: 1) Between cards, 2) Above source card, 3) Below target card
-        let bestT = 0.5;
-        let bestX = 0;
-        let bestY = 0;
-        let foundSafePosition = false;
-
-        // First, try positions between cards (t = 0.2 to 0.8)
-        for (let t = 0.2; t <= 0.8 && !foundSafePosition; t += 0.05) {
-          const testX = (1 - t) * (1 - t) * sourceX + 2 * (1 - t) * t * controlX + t * t * targetX;
-          const testY = (1 - t) * (1 - t) * sourceY + 2 * (1 - t) * t * controlY + t * t * targetY;
-
-          const insideSource = isInsideCard(testX, testY, line.sourceRect);
-          const insideTarget = isInsideCard(testX, testY, line.targetRect);
-          const tooCloseSource = isTooCloseToCard(testX, testY, line.sourceRect);
-          const tooCloseTarget = isTooCloseToCard(testX, testY, line.targetRect);
-
-          // Position is safe if it's not inside or too close to either card
-          if (!insideSource && !insideTarget && !tooCloseSource && !tooCloseTarget) {
-            bestT = t;
-            bestX = testX;
-            bestY = testY;
-            foundSafePosition = true;
-          }
-        }
-
-        // If no position found between cards, try above source card (t < 0.2)
-        if (!foundSafePosition) {
-          for (let t = 0.05; t < 0.2 && !foundSafePosition; t += 0.05) {
-            const testX = (1 - t) * (1 - t) * sourceX + 2 * (1 - t) * t * controlX + t * t * targetX;
-            const testY = (1 - t) * (1 - t) * sourceY + 2 * (1 - t) * t * controlY + t * t * targetY;
-
-            const insideSource = isInsideCard(testX, testY, line.sourceRect);
-            const tooCloseSource = isTooCloseToCard(testX, testY, line.sourceRect);
-
-            if (!insideSource && !tooCloseSource) {
-              bestT = t;
-              bestX = testX;
-              bestY = testY;
-              foundSafePosition = true;
+        // Simplify path (remove redundant points)
+        const simplifiedPath = [];
+        if (path.length > 0) {
+          simplifiedPath.push(path[0]);
+          for (let i = 1; i < path.length - 1; i++) {
+            const prev = path[i - 1];
+            const curr = path[i];
+            const next = path[i + 1];
+            // Keep point if it's a corner (direction changes)
+            const dir1 = { x: curr.x - prev.x, y: curr.y - prev.y };
+            const dir2 = { x: next.x - curr.x, y: next.y - curr.y };
+            if (dir1.x !== dir2.x || dir1.y !== dir2.y) {
+              simplifiedPath.push(curr);
             }
           }
+          simplifiedPath.push(path[path.length - 1]);
         }
 
-        // If still no position found, try below target card (t > 0.8)
-        if (!foundSafePosition) {
-          for (let t = 0.85; t <= 0.95 && !foundSafePosition; t += 0.05) {
-            const testX = (1 - t) * (1 - t) * sourceX + 2 * (1 - t) * t * controlX + t * t * targetX;
-            const testY = (1 - t) * (1 - t) * sourceY + 2 * (1 - t) * t * controlY + t * t * targetY;
-
-            const insideTarget = isInsideCard(testX, testY, line.targetRect);
-            const tooCloseTarget = isTooCloseToCard(testX, testY, line.targetRect);
-
-            if (!insideTarget && !tooCloseTarget) {
-              bestT = t;
-              bestX = testX;
-              bestY = testY;
-              foundSafePosition = true;
-            }
-          }
-        }
-
-        // Fallback: if still no safe position, place it in the middle of the gap
-        // This should rarely happen, but ensures we always have a position
-        if (!foundSafePosition) {
-          // Place icon at midpoint but offset vertically to avoid cards
-          const midY = (sourceY + targetY) / 2;
-          const midX = (sourceX + targetX) / 2;
-          
-          // Check which card is closer and offset away from it
-          const distToSource = Math.abs(midY - line.sourceRect.bottom);
-          const distToTarget = Math.abs(midY - line.targetRect.top);
-          
-          if (distToSource < distToTarget) {
-            // Place above source card
-            bestY = line.sourceRect.top - MIN_DISTANCE_FROM_CARD - ICON_RADIUS;
-          } else {
-            // Place below target card
-            bestY = line.targetRect.bottom + MIN_DISTANCE_FROM_CARD + ICON_RADIUS;
-          }
-          bestX = midX;
-        }
-
-        icons.push({
-          id: line.id,
-          x: bestX,
-          y: bestY,
-          sourceId: line.sourceId,
-          targetId: line.targetId,
+        lines.push({
+          id: conn.id,
+          sourceId: conn.sourceId,
+          targetId: conn.targetId,
+          path: simplifiedPath,
+          sourceX,
+          sourceY,
+          targetX,
+          targetY,
         });
+
+        // Calculate plus icon position (middle of path, avoiding cards)
+        if (simplifiedPath.length >= 2) {
+          const midIndex = Math.floor(simplifiedPath.length / 2);
+          let iconX = simplifiedPath[midIndex].x;
+          let iconY = simplifiedPath[midIndex].y;
+
+          // Adjust if too close to a card
+          const isTooClose = (x, y) => {
+            return obstacles.some((obs) => {
+              const distX = Math.max(obs.left - x, x - obs.right, 0);
+              const distY = Math.max(obs.top - y, y - obs.bottom, 0);
+              const dist = Math.sqrt(distX * distX + distY * distY);
+              return dist < MIN_DISTANCE_FROM_CARD + ICON_RADIUS;
+            });
+          };
+
+          // Try to find a safe position near the midpoint
+          if (isTooClose(iconX, iconY)) {
+            // Try positions along the path
+            for (let i = 0; i < simplifiedPath.length; i++) {
+              const testX = simplifiedPath[i].x;
+              const testY = simplifiedPath[i].y;
+              if (!isTooClose(testX, testY)) {
+                iconX = testX;
+                iconY = testY;
+                break;
+              }
+            }
+          }
+
+          icons.push({
+            id: conn.id,
+            x: iconX,
+            y: iconY,
+            sourceId: conn.sourceId,
+            targetId: conn.targetId,
+          });
+        }
       });
 
       setConnectionLines(lines);
@@ -496,35 +630,41 @@ const HierarchyChart = ({ data, onEditClick, onAddChildClick }) => {
             selectedCard === line.sourceId &&
             activeConnections.includes(line.targetId);
 
-          // Calculate actual connection points with offsets
-          const sourceX = line.sourceX + (line.sourceOffsetX || 0);
-          const sourceY = line.sourceY;
-          const targetX = line.targetX + (line.targetOffsetX || 0);
-          const targetY = line.targetY;
+          // Build orthogonal path from path points
+          let pathData = "";
+          if (line.path && line.path.length > 0) {
+            pathData = `M ${line.path[0].x} ${line.path[0].y}`;
+            for (let i = 1; i < line.path.length; i++) {
+              pathData += ` L ${line.path[i].x} ${line.path[i].y}`;
+            }
+          } else {
+            // Fallback to straight line if no path
+            pathData = `M ${line.sourceX} ${line.sourceY} L ${line.targetX} ${line.targetY}`;
+          }
 
-          // Calculate control point for quadratic Bezier curve
-          // Control point is positioned vertically between source and target,
-          // horizontally at the offset position for smooth curve
-          const controlY = sourceY + (targetY - sourceY) / 2;
-          const controlX = (sourceX + targetX) / 2;
+          // Calculate arrow orientation from last segment of path
+          let endAngle = 0;
+          if (line.path && line.path.length >= 2) {
+            const lastPoint = line.path[line.path.length - 1];
+            const secondLastPoint = line.path[line.path.length - 2];
+            endAngle = Math.atan2(
+              lastPoint.y - secondLastPoint.y,
+              lastPoint.x - secondLastPoint.x
+            );
+          } else {
+            endAngle = Math.atan2(
+              line.targetY - line.sourceY,
+              line.targetX - line.sourceX
+            );
+          }
 
-          // Create quadratic Bezier path
-          const pathData = `M ${sourceX} ${sourceY} Q ${controlX} ${controlY} ${targetX} ${targetY}`;
-
-          // Calculate angle at the end of the curve for arrow orientation
-          // For quadratic Bezier: derivative at t=1 gives the tangent
-          const endAngle = Math.atan2(
-            targetY - controlY,
-            targetX - controlX
-          );
-
-          // Arrow head points (rotated based on curve angle)
+          // Arrow head points (rotated based on path angle)
           const arrowSize = 8;
           const arrowWidth = 6;
-          const arrowX1 = targetX - arrowSize * Math.cos(endAngle) + arrowWidth * Math.sin(endAngle);
-          const arrowY1 = targetY - arrowSize * Math.sin(endAngle) - arrowWidth * Math.cos(endAngle);
-          const arrowX2 = targetX - arrowSize * Math.cos(endAngle) - arrowWidth * Math.sin(endAngle);
-          const arrowY2 = targetY - arrowSize * Math.sin(endAngle) + arrowWidth * Math.cos(endAngle);
+          const arrowX1 = line.targetX - arrowSize * Math.cos(endAngle) + arrowWidth * Math.sin(endAngle);
+          const arrowY1 = line.targetY - arrowSize * Math.sin(endAngle) - arrowWidth * Math.cos(endAngle);
+          const arrowX2 = line.targetX - arrowSize * Math.cos(endAngle) - arrowWidth * Math.sin(endAngle);
+          const arrowY2 = line.targetY - arrowSize * Math.sin(endAngle) + arrowWidth * Math.cos(endAngle);
 
           return (
             <g key={line.id}>
@@ -536,10 +676,12 @@ const HierarchyChart = ({ data, onEditClick, onAddChildClick }) => {
                 }
                 strokeWidth={isSelected ? 3 : isActive ? 2 : 1.5}
                 strokeDasharray={isActive ? "0" : "4,2"}
+                strokeLinecap="round"
+                strokeLinejoin="round"
               />
 
               <polygon
-                points={`${targetX},${targetY} ${arrowX1},${arrowY1} ${arrowX2},${arrowY2}`}
+                points={`${line.targetX},${line.targetY} ${arrowX1},${arrowY1} ${arrowX2},${arrowY2}`}
                 fill={isSelected ? "#3b82f6" : isActive ? "#60a5fa" : "#d1d5db"}
               />
             </g>
