@@ -24,7 +24,7 @@ export function Sidebar(props: SidebarProps = {}) {
   const user = useSelector((state: RootState) => state.auth.user);
   const isAdmin = user?.role === "Admin";
   const [internalIsOpen, setInternalIsOpen] = useState(false);
-  
+
   // Use external state if provided, otherwise use internal state
   const isOpen = externalIsOpen !== undefined ? externalIsOpen : internalIsOpen;
   const setIsOpen = externalSetIsOpen || setInternalIsOpen;
@@ -37,11 +37,11 @@ export function Sidebar(props: SidebarProps = {}) {
   };
 
   // Active link styling function
-  const getLinkClass = (href: string) => {
+  const getLinkClass = (href: string, isCenter: boolean) => {
     const isActive = pathname === href;
     return `w-full justify-start text-white hover:text-primary hover:bg-background ${
       isActive ? "bg-background text-primary" : ""
-    }`;
+    } ${isCenter ? "my-1" : ""}`;
   };
 
   return (
@@ -86,7 +86,10 @@ export function Sidebar(props: SidebarProps = {}) {
 
         <nav className="flex-1 pl-1 pr-5 space-y-2">
           <Link href="/appointments" onClick={() => setIsOpen(false)}>
-            <Button variant="ghost" className={getLinkClass("/appointments")}>
+            <Button
+              variant="ghost"
+              className={getLinkClass("/appointments", false)}
+            >
               <Calendar className="w-4 h-4 mr-2" />
               <span className="text-sm">Appointments</span>
             </Button>
@@ -95,7 +98,10 @@ export function Sidebar(props: SidebarProps = {}) {
           {isAdmin && (
             <>
               <Link href="/users" onClick={() => setIsOpen(false)}>
-                <Button variant="ghost" className={getLinkClass("/users")}>
+                <Button
+                  variant="ghost"
+                  className={getLinkClass("/users", true)}
+                >
                   <Users className="w-4 h-4 mr-2" />
                   <span className="text-sm">Users</span>
                 </Button>
@@ -104,7 +110,7 @@ export function Sidebar(props: SidebarProps = {}) {
               <Link href="/questionnaires" onClick={() => setIsOpen(false)}>
                 <Button
                   variant="ghost"
-                  className={getLinkClass("/questionnaires")}
+                  className={getLinkClass("/questionnaires", false)}
                 >
                   <HelpCircle className="w-4 h-4 mr-2" />
                   <span className="text-sm">Questionnaires</span>

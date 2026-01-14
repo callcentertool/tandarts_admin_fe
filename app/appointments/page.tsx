@@ -27,6 +27,7 @@ export default function AppointmentsPage() {
     (state: RootState) => state.appointments
   );
   const [searchQuery, setSearchQuery] = useState("");
+  const [pdfDownloadLoading, setPdfDownloadLoading] = useState(false);
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const prevSearchRef = useRef<string>("");
 
@@ -69,7 +70,7 @@ export default function AppointmentsPage() {
     }
   }, [dispatch, page, limit, debouncedSearch]);
 
-    // ----- SOCKET.IO Integration -----
+  // ----- SOCKET.IO Integration -----
   useEffect(() => {
     const socket = initSocket();
 
@@ -90,14 +91,17 @@ export default function AppointmentsPage() {
   }, [fetchAppointments]);
 
   const handleDownloadPDF = async (appointmentId: string) => {
-    dispatch(setLoading(true));
+    // dispatch(setLoading(true));
+    setPdfDownloadLoading(true);
     try {
       await downloadAppointmentPDF(appointmentId);
-      dispatch(setLoading(false));
+      // dispatch(setLoading(false));
+      setPdfDownloadLoading(false);
     } catch (error) {
       console.error("Error fetching appointments:", error);
     } finally {
-      dispatch(setLoading(false));
+      // dispatch(setLoading(false));
+      setPdfDownloadLoading(false);
     }
   };
 
@@ -179,10 +183,15 @@ export default function AppointmentsPage() {
                     onClick={() => handleDownloadPDF((appointment as any)._id)}
                     title="Download PDF"
                     className="p-[2px] sm:p-1"
-                    disabled={isLoading}
+                    disabled={isLoading || pdfDownloadLoading}
                   >
-                    <Download className="w-5 h-5 sm:w-6 sm:h-6" />
+                    {pdfDownloadLoading ? (
+                      <Loader2 className="w-5 h-5 sm:w-6 sm:h-6 animate-spin" />
+                    ) : (
+                      <Download className="w-5 h-5 sm:w-6 sm:h-6" />
+                    )}
                   </Button>
+
                   <Button
                     size="sm"
                     variant="ghost"
